@@ -5,6 +5,7 @@ from aspartik.b3.likelihoods import (
     CPU4Likelihood,
     CUDALikelihood,
     Likelihood,
+    MetalLikelihood,
 )
 from aspartik.b3.parameters import Real, RealVector, Tree
 from aspartik.b3.substitutions import HKY
@@ -45,9 +46,21 @@ def test_compare_likelihood():
     except Exception:
         cuda_calculator = None
 
+    try:
+        metal_calculator = MetalLikelihood(
+            msa=msa,
+            substitution=HKY(frequencies, kappa),
+            clock=Clock.Strict(clock_rate),
+            tree=tree,
+        )
+    except Exception:
+        metal_calculator = None
+
     calculators: list[Likelihood] = [*cpu_calculators]
     if cuda_calculator:
         calculators.insert(0, cuda_calculator)
+    if metal_calculator:
+        calculators.append(metal_calculator)
 
     compare_b3(
         "data/runs/influenza/b3.trace",
