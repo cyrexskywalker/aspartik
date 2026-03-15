@@ -117,6 +117,17 @@ class CUDALikelihood(Likelihood):
         cuda_device: int = 0,
     ): ...
 
+class MetalLikelihood(Likelihood):
+    def __init__(
+        self,
+        msa: MSA,
+        substitution: Substiution4,
+        clock: Clock,
+        tree: Tree,
+        *,
+        scale_ln: int = 30,
+    ): ...
+
 class HeteroLikelihood(Likelihood):
     def __init__(self, likelihoods: list[Likelihood]): ...
     @property

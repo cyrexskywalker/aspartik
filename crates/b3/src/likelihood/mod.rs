@@ -18,11 +18,13 @@ use logger::{info, trace};
 
 mod cpu;
 mod cuda;
+mod metal;
 mod hetero;
 mod parallel;
 
 use cpu::CpuLikelihood;
 use cuda::CudaLikelihood;
+use metal::MetalLikelihood;
 pub use hetero::PyHeteroLikelihood;
 use parallel::ParallelLikelihood;
 
@@ -496,10 +498,56 @@ impl PyCudaLikelihood {
 
 likelihood_methods!(PyCudaLikelihood);
 
+/// Likelihood calculations on Apple Metal (macOS only).
+#[pyclass(name = "MetalLikelihood", module = "aspartik.b3.likelihoods", frozen)]
+pub struct PyMetalLikelihood {
+	inner: Mutex<
+		GenericLikelihood<4, f64, MetalLikelihood, PySubstitution4>,
+	>,
+}
+
+#[pymethods]
+impl PyMetalLikelihood {
+	#[new]
+	#[pyo3(signature = (
+		msa, substitution, clock, tree,
+		*,
+		scale_ln = 30,
+	))]
+	fn new(
+		msa: Py<PyMsa>,
+		substitution: PySubstitution4,
+		clock: Py<PyClock>,
+		tree: Py<PyTree>,
+		scale_ln: u32,
+	) -> Result<Self> {
+		let (leaves, weights) = deduplicate(msa.get());
+		let calculator = MetalLikelihood::new(
+			weights.len(),
+			leaves,
+			scale_ln,
+		)?;
+		let generic = GenericLikelihood::new(
+			calculator,
+			weights,
+			substitution,
+			clock,
+			tree,
+		)?;
+
+		Ok(Self {
+			inner: Mutex::new(generic),
+		})
+	}
+}
+
+likelihood_methods!(PyMetalLikelihood);
+
 pub enum PyLikelihood {
 	Cpu(Py<PyCpu4Likelihood>),
 	Parallel(Py<PyParallel4Likelihood>),
 	Cuda(Py<PyCudaLikelihood>),
+	Metal(Py<PyMetalLikelihood>),
 	Hetero(Py<PyHeteroLikelihood>),
 }
 
@@ -513,6 +561,8 @@ impl<'py> FromPyObject<'_, 'py> for PyLikelihood {
 			Ok(Self::Parallel(l.into()))
 		} else if let Ok(l) = obj.cast::<PyCudaLikelihood>() {
 			Ok(Self::Cuda(l.into()))
+		} else if let Ok(l) = obj.cast::<PyMetalLikelihood>() {
+			Ok(Self::Metal(l.into()))
 		} else if let Ok(l) = obj.cast::<PyHeteroLikelihood>() {
 			Ok(Self::Hetero(l.into()))
 		} else {
@@ -531,6 +581,7 @@ impl<'py> IntoPyObject<'py> for PyLikelihood {
 			Self::Cpu(l) => l.clone_ref(py).into_any(),
 			Self::Parallel(l) => l.clone_ref(py).into_any(),
 			Self::Cuda(l) => l.clone_ref(py).into_any(),
+			Self::Metal(l) => l.clone_ref(py).into_any(),
 			Self::Hetero(l) => l.clone_ref(py).into_any(),
 		};
 		Ok(any.into_bound(py))
@@ -543,6 +594,7 @@ impl PyLikelihood {
 			Self::Cpu(l) => Self::Cpu(l.clone_ref(py)),
 			Self::Parallel(l) => Self::Parallel(l.clone_ref(py)),
 			Self::Cuda(l) => Self::Cuda(l.clone_ref(py)),
+			Self::Metal(l) => Self::Metal(l.clone_ref(py)),
 			Self::Hetero(l) => Self::Hetero(l.clone_ref(py)),
 		}
 	}
@@ -552,6 +604,7 @@ impl PyLikelihood {
 			Self::Cpu(l) => l.get().propose(),
 			Self::Parallel(l) => l.get().propose(),
 			Self::Cuda(l) => l.get().propose(),
+			Self::Metal(l) => l.get().propose(),
 			Self::Hetero(l) => l.get().propose(),
 		}
 	}
@@ -561,6 +614,7 @@ impl PyLikelihood {
 			Self::Cpu(l) => l.get().likelihood(),
 			Self::Parallel(l) => l.get().likelihood(),
 			Self::Cuda(l) => l.get().likelihood(),
+			Self::Metal(l) => l.get().likelihood(),
 			Self::Hetero(l) => l.get().likelihood(),
 		}
 	}
@@ -570,6 +624,7 @@ impl PyLikelihood {
 			Self::Cpu(l) => l.get().accept(),
 			Self::Parallel(l) => l.get().accept(),
 			Self::Cuda(l) => l.get().accept(),
+			Self::Metal(l) => l.get().accept(),
 			Self::Hetero(l) => l.get().accept(),
 		}
 	}
@@ -579,6 +634,7 @@ impl PyLikelihood {
 			Self::Cpu(l) => l.get().reject(),
 			Self::Parallel(l) => l.get().reject(),
 			Self::Cuda(l) => l.get().reject(),
+			Self::Metal(l) => l.get().reject(),
 			Self::Hetero(l) => l.get().reject(),
 		}
 	}
@@ -588,6 +644,7 @@ impl PyLikelihood {
 			Self::Cpu(l) => l.get().num_patterns(),
 			Self::Parallel(l) => l.get().num_patterns(),
 			Self::Cuda(l) => l.get().num_patterns(),
+			Self::Metal(l) => l.get().num_patterns(),
 			Self::Hetero(_l) => todo!(),
 		}
 	}
@@ -597,6 +654,7 @@ impl PyLikelihood {
 			Self::Cpu(l) => l.get().pattern_likelihoods(),
 			Self::Parallel(l) => l.get().pattern_likelihoods(),
 			Self::Cuda(l) => l.get().pattern_likelihoods(),
+			Self::Metal(l) => l.get().pattern_likelihoods(),
 			Self::Hetero(_l) => todo!(),
 		}
 	}

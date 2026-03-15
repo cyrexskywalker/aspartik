@@ -5,6 +5,7 @@ from aspartik.b3.likelihoods import (
     CPU4Likelihood,
     CUDALikelihood,
     HeteroLikelihood,
+    MetalLikelihood,
     Parallel4Likelihood,
 )
 from aspartik.b3.parameters import Real, RealVector, Tree
@@ -68,7 +69,14 @@ def test_compare_likelihood():
     except Exception:
         cuda_calculator = None
 
-    calculators = [*cpu_calculators, *parallel_calculators, hetero]
+    metal_calculator = MetalLikelihood(
+        msa=msa,
+        substitution=HKY(frequencies, kappa),
+        clock=Clock.Strict(clock_rate),
+        tree=tree,
+    )
+
+    calculators = [*cpu_calculators, *parallel_calculators, hetero, metal_calculator]
     if cuda_calculator:
         calculators.insert(0, cuda_calculator)
 
