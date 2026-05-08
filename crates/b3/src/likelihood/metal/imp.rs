@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use metal::{
 	Buffer, CommandQueue, CompileOptions, ComputePipelineState, Device,
 	MTLResourceOptions, MTLSize,
@@ -46,13 +46,16 @@ impl MetalLikelihood {
 		let options = CompileOptions::new();
 		let library = device
 			.new_library_with_source(source, &options)
-			.map_err(|e| anyhow!("failed to compile Metal library: {e}"))?;
+			.map_err(anyhow::Error::msg)
+			.context("failed to compile Metal library")?;
 		let function = library
 			.get_function("propose_kernel", None)
-			.map_err(|e| anyhow!("failed to get propose_kernel: {e}"))?;
+			.map_err(anyhow::Error::msg)
+			.context("failed to get propose_kernel")?;
 		let pipeline = device
 			.new_compute_pipeline_state_with_function(&function)
-			.map_err(|e| anyhow!("failed to create compute pipeline: {e}"))?;
+			.map_err(anyhow::Error::msg)
+			.context("failed to create compute pipeline")?;
 
 		let num_leaves = leaves.len() / num_sites;
 		let num_internals = num_leaves - 1;
