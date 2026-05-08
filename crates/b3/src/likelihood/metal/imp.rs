@@ -163,28 +163,6 @@ impl MetalLikelihood {
 		command_buffer.commit();
 		command_buffer.wait_until_completed();
 	}
-
-	fn read_buffer<T: Copy>(&self, buf: &Buffer, out: &mut [T]) {
-		assert_eq!(buf.length() as usize, out.len() * mem::size_of::<T>());
-
-		unsafe {
-			// The assertion above guarantees that `out` has exactly enough space
-			// for the typed contents of `buf`, and `T: Copy` avoids drop issues.
-			let src = buf.contents() as *const T;
-			ptr::copy_nonoverlapping(src, out.as_mut_ptr(), out.len());
-		}
-	}
-
-	fn write_buffer<T: Copy>(&self, buf: &Buffer, data: &[T]) {
-		assert!(buf.length() as usize >= data.len() * mem::size_of::<T>());
-
-		unsafe {
-			// The assertion above guarantees that the destination buffer is large
-			// enough for `data`, and `T: Copy` makes the raw byte copy sound.
-			let dst = buf.contents() as *mut T;
-			ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len());
-		}
-	}
 }
 
 impl Calculator<4, f64> for MetalLikelihood {
@@ -221,9 +199,14 @@ impl Calculator<4, f64> for MetalLikelihood {
 			transitions_rows.push(cast_row(t[3]));
 		}
 
-		self.write_buffer(&self.nodes, &nodes_u32);
-		self.write_buffer(&self.children, &children_u32);
-		self.write_buffer(&self.transitions, &transitions_rows);
+		unsafe {
+			// SAFETY: `propose` has `&mut self`, so there is no concurrent host-side
+			// access through this calculator instance. No command buffer touching these
+			// inputs is in flight yet; they are written before `encode_propose`.
+			write_buffer(&self.nodes, &nodes_u32);
+			write_buffer(&self.children, &children_u32);
+			write_buffer(&self.transitions, &transitions_rows);
+		}
 
 		let params = [KernelParams {
 			num_sites: self.num_sites as u32,
@@ -240,7 +223,11 @@ impl Calculator<4, f64> for MetalLikelihood {
 				frequencies[3] as f32,
 			],
 		}];
-		self.write_buffer(&self.params, &params);
+		unsafe {
+			// SAFETY: same invariant as above; the parameter buffer is populated on
+			// the host before the kernel is launched.
+			write_buffer(&self.params, &params);
+		}
 
 		self.encode_propose();
 		Ok(())
@@ -248,10 +235,18 @@ impl Calculator<4, f64> for MetalLikelihood {
 
 	fn likelihood(&mut self, patterns: &mut [f64]) -> Result<()> {
 		let mut likelihoods = vec![0f32; self.num_sites];
-		self.read_buffer(&self.likelihoods, &mut likelihoods);
+		unsafe {
+			// SAFETY: all compute and blit command buffers in this type are waited on
+			// before returning, and `likelihood` has `&mut self`, so this host read
+			// cannot race with another host/device access through this calculator.
+			read_buffer(&self.likelihoods, &mut likelihoods);
+		}
 
 		let mut scale_sums = vec![0u32; self.num_sites];
-		self.read_buffer(&self.scale_sums, &mut scale_sums);
+		unsafe {
+			// SAFETY: same invariant as for `likelihoods` above.
+			read_buffer(&self.scale_sums, &mut scale_sums);
+		}
 
 		for i in 0..self.num_sites {
 			patterns[i] = f64::from(likelihoods[i]) - f64::from(scale_sums[i]);
@@ -266,7 +261,11 @@ impl Calculator<4, f64> for MetalLikelihood {
 		}
 
 		let mut scale_sums_backup = vec![0u32; self.num_sites];
-		self.read_buffer(&self.scale_sums, &mut scale_sums_backup);
+		unsafe {
+			// SAFETY: `accept` has `&mut self`, and the latest kernel launch already
+			// completed before we snapshot the accepted scale sums.
+			read_buffer(&self.scale_sums, &mut scale_sums_backup);
+		}
 		self.scale_sums_backup = scale_sums_backup;
 		self.blit_copy(&self.projections, &self.projections_backup);
 		self.blit_copy(&self.scales, &self.scales_backup);
@@ -283,7 +282,11 @@ impl Calculator<4, f64> for MetalLikelihood {
 		self.blit_copy(&self.projections_backup, &self.projections);
 		self.blit_copy(&self.scales_backup, &self.scales);
 		let scale_sums_backup = self.scale_sums_backup.clone();
-		self.write_buffer(&self.scale_sums, &scale_sums_backup);
+		unsafe {
+			// SAFETY: `reject` has `&mut self`, and this host write happens after the
+			// previous command buffers have completed.
+			write_buffer(&self.scale_sums, &scale_sums_backup);
+		}
 		self.num_updated_nodes = 0;
 
 		Ok(())
@@ -294,6 +297,27 @@ fn cast_row(row: [f64; 4]) -> [f32; 4] {
 	[row[0] as f32, row[1] as f32, row[2] as f32, row[3] as f32]
 }
 
+unsafe fn read_buffer<T: Copy>(buf: &Buffer, out: &mut [T]) {
+	assert_eq!(buf.length() as usize, out.len() * mem::size_of::<T>());
+
+	// SAFETY: the caller must guarantee that no host or device write races with
+	// this read. The assertion guarantees that `out` has exactly enough space for
+	// `out.len()` values of `T`, and `T: Copy` makes the bytewise copy sound.
+	let src = buf.contents() as *const T;
+	unsafe { ptr::copy_nonoverlapping(src, out.as_mut_ptr(), out.len()) };
+}
+
+unsafe fn write_buffer<T: Copy>(buf: &Buffer, data: &[T]) {
+	assert!(buf.length() as usize >= data.len() * mem::size_of::<T>());
+
+	// SAFETY: the caller must guarantee exclusive access with respect to host and
+	// device readers/writers. The assertion guarantees that the destination is
+	// large enough for `data.len()` values of `T`, and `T: Copy` makes the raw
+	// copy sound.
+	let dst = buf.contents() as *mut T;
+	unsafe { ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len()) };
+}
+
 fn new_buffer<T>(
 	device: &Device,
 	data: &[T],
@@ -302,9 +326,10 @@ fn new_buffer<T>(
 	let size = (data.len() * mem::size_of::<T>()) as u64;
 	let buf = device.new_buffer(size, options);
 
+	// SAFETY: `buf` was allocated with exactly `size` writable bytes, where
+	// `size` was computed from `data.len()` and `size_of::<T>()`, so copying
+	// `data.len()` values of `T` into it is in-bounds.
 	unsafe {
-		// `size` is derived from `data.len()` and `T`, so the newly allocated
-		// buffer is exactly large enough for this typed copy.
 		let dst = buf.contents() as *mut T;
 		ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len());
 	}
@@ -320,9 +345,9 @@ fn new_zeroed_buffer<T>(
 	let size = (len * mem::size_of::<T>()) as u64;
 	let buf = device.new_buffer(size, options);
 
+	// SAFETY: `buf` owns `size` writable bytes, so zero-filling that exact range
+	// is valid regardless of `T`.
 	unsafe {
-		// `buf` owns `size` bytes of writable storage, so zero-filling that exact
-		// region is valid regardless of `T`.
 		ptr::write_bytes(buf.contents(), 0, size as usize);
 	}
 
