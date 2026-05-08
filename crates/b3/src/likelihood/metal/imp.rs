@@ -9,6 +9,19 @@ use std::ptr;
 
 use super::Calculator;
 
+#[repr(C, align(16))]
+#[derive(Clone, Copy)]
+struct KernelParams {
+	num_sites: u32,
+	num_updated_nodes: u32,
+	leaves_end: u32,
+	scale_ln: u32,
+	scale: f32,
+	inv_scale: f32,
+	_pad: [f32; 2],
+	frequencies: [f32; 4],
+}
+
 pub struct MetalLikelihood {
 	queue: CommandQueue,
 	pipeline: ComputePipelineState,
@@ -26,9 +39,7 @@ pub struct MetalLikelihood {
 	children: Buffer,
 	transitions: Buffer,
 
-	params_u32: Buffer,
-	params_f32: Buffer,
-	freq: Buffer,
+	params: Buffer,
 	num_sites: usize,
 	scale_ln: u32,
 	scale: f32,
@@ -84,9 +95,7 @@ impl MetalLikelihood {
 			options,
 		);
 
-		let params_u32 = new_zeroed_buffer::<u32>(&device, 4, options);
-		let params_f32 = new_zeroed_buffer::<f32>(&device, 2, options);
-		let freq = new_zeroed_buffer::<[f32; 4]>(&device, 1, options);
+		let params = new_zeroed_buffer::<KernelParams>(&device, 1, options);
 
 		let scale = (-(scale_ln as f64)).exp() as f32;
 		let inv_scale = 1.0f32 / scale;
@@ -105,9 +114,7 @@ impl MetalLikelihood {
 			nodes,
 			children,
 			transitions,
-			params_u32,
-			params_f32,
-			freq,
+			params,
 			num_sites,
 			scale_ln,
 			scale,
@@ -129,9 +136,7 @@ impl MetalLikelihood {
 		encoder.set_buffer(5, Some(&self.children), 0);
 		encoder.set_buffer(6, Some(&self.transitions), 0);
 		encoder.set_buffer(7, Some(&self.likelihoods), 0);
-		encoder.set_buffer(8, Some(&self.params_u32), 0);
-		encoder.set_buffer(9, Some(&self.params_f32), 0);
-		encoder.set_buffer(10, Some(&self.freq), 0);
+		encoder.set_buffer(8, Some(&self.params), 0);
 
 		let threads_per_grid = MTLSize {
 			width: self.num_sites as u64,
@@ -220,22 +225,22 @@ impl Calculator<4, f64> for MetalLikelihood {
 		self.write_buffer(&self.children, &children_u32);
 		self.write_buffer(&self.transitions, &transitions_rows);
 
-		let p = [
-			self.num_sites as u32,
-			num_updated_nodes as u32,
-			leaves_end as u32,
-			self.scale_ln,
-		];
-		self.write_buffer(&self.params_u32, &p);
-		self.write_buffer(&self.params_f32, &[self.scale, self.inv_scale]);
-
-		let f = [[
-			frequencies[0] as f32,
-			frequencies[1] as f32,
-			frequencies[2] as f32,
-			frequencies[3] as f32,
-		]];
-		self.write_buffer(&self.freq, &f);
+		let params = [KernelParams {
+			num_sites: self.num_sites as u32,
+			num_updated_nodes: num_updated_nodes as u32,
+			leaves_end: leaves_end as u32,
+			scale_ln: self.scale_ln,
+			scale: self.scale,
+			inv_scale: self.inv_scale,
+			_pad: [0.0; 2],
+			frequencies: [
+				frequencies[0] as f32,
+				frequencies[1] as f32,
+				frequencies[2] as f32,
+				frequencies[3] as f32,
+			],
+		}];
+		self.write_buffer(&self.params, &params);
 
 		self.encode_propose();
 		Ok(())

@@ -1,6 +1,17 @@
 #include <metal_stdlib>
 using namespace metal;
 
+struct KernelParams {
+	uint num_sites;
+	uint num_updated_nodes;
+	uint leaves_end;
+	uint scale_ln;
+	float scale;
+	float inv_scale;
+	float2 _pad;
+	float4 frequencies;
+};
+
 // Build the 4-state projection for one leaf/site pair from the ambiguity mask.
 static inline float4 calc_leaf_projection(uchar leaf, float4 t0, float4 t1, float4 t2, float4 t3) {
 	float4 out = float4(0.0f);
@@ -21,18 +32,17 @@ kernel void propose_kernel(
 	const device uint* children [[buffer(5)]],
 	const device float4* transitions [[buffer(6)]],
 	device float* likelihoods [[buffer(7)]],
-	const device uint* params_u32 [[buffer(8)]],
-	const device float* params_f32 [[buffer(9)]],
-	const device float4* freq_buf [[buffer(10)]],
+	const device KernelParams* params_buf [[buffer(8)]],
 	uint gid [[thread_position_in_grid]]
 ) {
-	uint num_sites = params_u32[0];
-	uint num_updated = params_u32[1];
-	uint leaves_end = params_u32[2];
-	uint scale_ln = params_u32[3];
-	float scale = params_f32[0];
-	float inv_scale = params_f32[1];
-	float4 frequencies = freq_buf[0];
+	const device KernelParams& params = params_buf[0];
+	uint num_sites = params.num_sites;
+	uint num_updated = params.num_updated_nodes;
+	uint leaves_end = params.leaves_end;
+	uint scale_ln = params.scale_ln;
+	float scale = params.scale;
+	float inv_scale = params.inv_scale;
+	float4 frequencies = params.frequencies;
 
 	if (gid >= num_sites) {
 		return;
