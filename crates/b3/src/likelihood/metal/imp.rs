@@ -44,7 +44,6 @@ pub struct MetalLikelihood {
 	scale_ln: u32,
 	scale: f32,
 	inv_scale: f32,
-	num_updated_nodes: usize,
 }
 
 impl MetalLikelihood {
@@ -119,7 +118,6 @@ impl MetalLikelihood {
 			scale_ln,
 			scale,
 			inv_scale,
-			num_updated_nodes: 0,
 		})
 	}
 
@@ -179,7 +177,6 @@ impl Calculator<4, f64> for MetalLikelihood {
 		}
 
 		let num_updated_nodes = nodes.len() - 1;
-		self.num_updated_nodes = num_updated_nodes;
 		if num_updated_nodes == 0 {
 			return Ok(());
 		}
@@ -256,10 +253,6 @@ impl Calculator<4, f64> for MetalLikelihood {
 	}
 
 	fn accept(&mut self) -> Result<()> {
-		if self.num_updated_nodes == 0 {
-			return Ok(());
-		}
-
 		let mut scale_sums_backup = vec![0u32; self.num_sites];
 		unsafe {
 			// SAFETY: `accept` has `&mut self`, and the latest kernel launch already
@@ -269,16 +262,11 @@ impl Calculator<4, f64> for MetalLikelihood {
 		self.scale_sums_backup = scale_sums_backup;
 		self.blit_copy(&self.projections, &self.projections_backup);
 		self.blit_copy(&self.scales, &self.scales_backup);
-		self.num_updated_nodes = 0;
 
 		Ok(())
 	}
 
 	fn reject(&mut self) -> Result<()> {
-		if self.num_updated_nodes == 0 {
-			return Ok(());
-		}
-
 		self.blit_copy(&self.projections_backup, &self.projections);
 		self.blit_copy(&self.scales_backup, &self.scales);
 		let scale_sums_backup = self.scale_sums_backup.clone();
@@ -287,7 +275,6 @@ impl Calculator<4, f64> for MetalLikelihood {
 			// previous command buffers have completed.
 			write_buffer(&self.scale_sums, &scale_sums_backup);
 		}
-		self.num_updated_nodes = 0;
 
 		Ok(())
 	}
@@ -323,6 +310,8 @@ fn new_buffer<T>(
 	data: &[T],
 	options: MTLResourceOptions,
 ) -> Buffer {
+	// This helper is safe because the allocation size is derived directly from
+	// `data.len()` and `size_of::<T>()`, and the copied range is exactly `data`.
 	let size = (data.len() * mem::size_of::<T>()) as u64;
 	let buf = device.new_buffer(size, options);
 
@@ -342,6 +331,8 @@ fn new_zeroed_buffer<T>(
 	len: usize,
 	options: MTLResourceOptions,
 ) -> Buffer {
+	// This helper is safe because it allocates exactly `len * size_of::<T>()`
+	// bytes and only zero-fills that newly allocated range.
 	let size = (len * mem::size_of::<T>()) as u64;
 	let buf = device.new_buffer(size, options);
 
