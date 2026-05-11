@@ -135,7 +135,7 @@ impl MetalLikelihood {
 		let params =
 			new_zeroed_buffer::<KernelParams>(&device, 1, options);
 
-		let scale = (-(scale_ln as f64)).exp() as f32;
+		let scale = (-f64::from(scale_ln)).exp() as f32;
 		let inv_scale = 1.0f32 / scale;
 
 		Ok(Self {
@@ -234,10 +234,10 @@ impl Calculator<4, f64> for MetalLikelihood {
 			transitions_rows.push(cast_row(tm[3]));
 		}
 
+		// SAFETY: `likelihood` has `&mut self`, so no concurrent host-side
+		// access can go through this calculator. These buffers are populated on
+		// the host before the next kernel launch.
 		unsafe {
-			// SAFETY: `likelihood` has `&mut self`, so no concurrent host-side
-			// access can go through this calculator. These buffers are populated on
-			// the host before the next kernel launch.
 			write_buffer(&self.nodes, &nodes_u32);
 			write_buffer(&self.children, &children_u32);
 			write_buffer(&self.transitions, &transitions_rows);
@@ -265,15 +265,15 @@ impl Calculator<4, f64> for MetalLikelihood {
 		self.encode_propose();
 
 		let mut likelihoods = vec![0f32; self.num_patterns];
+		// SAFETY: `encode_propose` waits for completion before returning, so the
+		// device is no longer mutating these buffers when the host reads them.
 		unsafe {
-			// SAFETY: `encode_propose` waits for completion before returning, so the
-			// device is no longer mutating these buffers when the host reads them.
 			read_buffer(&self.likelihoods, &mut likelihoods);
 		}
 
 		let mut scale_sums = vec![0u32; self.num_patterns];
+		// SAFETY: same as for `likelihoods` above.
 		unsafe {
-			// SAFETY: same as for `likelihoods` above.
 			read_buffer(&self.scale_sums, &mut scale_sums);
 		}
 
@@ -293,9 +293,9 @@ impl Calculator<4, f64> for MetalLikelihood {
 
 	fn accept(&mut self) -> Result<()> {
 		let mut scale_sums_backup = vec![0u32; self.num_patterns];
+		// SAFETY: `accept` has `&mut self`, and all prior command buffers are
+		// synchronized before any host-side access to these buffers.
 		unsafe {
-			// SAFETY: `accept` has `&mut self`, and all prior command buffers are
-			// synchronized before any host-side access to these buffers.
 			read_buffer(&self.scale_sums, &mut scale_sums_backup);
 		}
 		self.scale_sums_backup = scale_sums_backup;
@@ -308,9 +308,9 @@ impl Calculator<4, f64> for MetalLikelihood {
 		self.blit_copy(&self.projections_backup, &self.projections);
 		self.blit_copy(&self.scales_backup, &self.scales);
 		let scale_sums_backup = self.scale_sums_backup.clone();
+		// SAFETY: `reject` has `&mut self`, and all prior command buffers are
+		// synchronized before the host restores the accepted scale sums.
 		unsafe {
-			// SAFETY: `reject` has `&mut self`, and all prior command buffers are
-			// synchronized before the host restores the accepted scale sums.
 			write_buffer(&self.scale_sums, &scale_sums_backup);
 		}
 		Ok(())
@@ -326,7 +326,7 @@ fn cast_row(row: [f64; 4]) -> [f32; 4] {
 }
 
 fn threads_per_threadgroup(pipeline: &ComputePipelineState) -> u64 {
-	let max = (pipeline.max_total_threads_per_threadgroup() as u64).max(4);
+	let max = pipeline.max_total_threads_per_threadgroup().max(4);
 	let max = max - max % 4;
 	let default = 256.min(max);
 
@@ -340,23 +340,22 @@ fn threads_per_threadgroup(pipeline: &ComputePipelineState) -> u64 {
 }
 
 unsafe fn read_buffer<T: Copy>(buf: &Buffer, out: &mut [T]) {
-	assert_eq!(buf.length() as usize, out.len() * mem::size_of::<T>());
+	assert_eq!(buf.length() as usize, mem::size_of_val(out));
 
-	// SAFETY: the caller must guarantee that no host or device write races with
-	// this read. The assertion guarantees that `out` has exactly enough space for
-	// `out.len()` values of `T`, and `T: Copy` makes the bytewise copy sound.
 	let src = buf.contents() as *const T;
+	// SAFETY: the caller must guarantee that no host or device write races with
+	// this read. The assertion guarantees that `out` has exactly enough space,
+	// and `T: Copy` makes the bytewise copy sound.
 	unsafe { ptr::copy_nonoverlapping(src, out.as_mut_ptr(), out.len()) };
 }
 
 unsafe fn write_buffer<T: Copy>(buf: &Buffer, data: &[T]) {
-	assert!(buf.length() as usize >= data.len() * mem::size_of::<T>());
+	assert!(buf.length() as usize >= mem::size_of_val(data));
 
+	let dst = buf.contents() as *mut T;
 	// SAFETY: the caller must guarantee exclusive access with respect to host and
 	// device readers/writers. The assertion guarantees that the destination is
-	// large enough for `data.len()` values of `T`, and `T: Copy` makes the raw
-	// copy sound.
-	let dst = buf.contents() as *mut T;
+	// large enough, and `T: Copy` makes the raw copy sound.
 	unsafe { ptr::copy_nonoverlapping(data.as_ptr(), dst, data.len()) };
 }
 
@@ -367,7 +366,7 @@ fn new_buffer<T>(
 ) -> Buffer {
 	// This helper is safe because the allocation size is derived directly from
 	// `data.len()` and `size_of::<T>()`, and the copied range is exactly `data`.
-	let size = (data.len() * mem::size_of::<T>()) as u64;
+	let size = mem::size_of_val(data) as u64;
 	let buf = device.new_buffer(size, options);
 
 	// SAFETY: `buf` was allocated with exactly `size` writable bytes, where
