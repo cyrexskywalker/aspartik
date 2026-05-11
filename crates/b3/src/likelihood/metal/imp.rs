@@ -5,11 +5,15 @@ use metal::{
 };
 use parking_lot::MutexGuard;
 
+use std::env;
 use std::mem;
 use std::ptr;
 
 use super::Calculator;
 use crate::{Transitions, parameters::Tree};
+
+const THREADS_PER_THREADGROUP_ENV: &str =
+	"ASPARTIK_METAL_THREADS_PER_THREADGROUP";
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy)]
@@ -44,6 +48,7 @@ pub struct MetalLikelihood {
 
 	num_patterns: usize,
 	pattern_weights: Vec<u32>,
+	threads_per_threadgroup: u64,
 	scale_ln: u32,
 	scale: f32,
 	inv_scale: f32,
@@ -75,6 +80,7 @@ impl MetalLikelihood {
 			.new_compute_pipeline_state_with_function(&function)
 			.map_err(anyhow::Error::msg)
 			.context("failed to create compute pipeline")?;
+		let threads_per_threadgroup = threads_per_threadgroup(&pipeline);
 
 		let num_leaves = leaves.len() / num_patterns;
 		let num_internals = num_leaves - 1;
@@ -82,14 +88,14 @@ impl MetalLikelihood {
 		let options = MTLResourceOptions::StorageModeShared;
 
 		let leaves = new_buffer(&device, &leaves, options);
-		let projections = new_zeroed_buffer::<[f32; 4]>(
+		let projections = new_zeroed_buffer::<f32>(
 			&device,
-			num_nodes * num_patterns,
+			num_nodes * num_patterns * 4,
 			options,
 		);
-		let projections_backup = new_zeroed_buffer::<[f32; 4]>(
+		let projections_backup = new_zeroed_buffer::<f32>(
 			&device,
-			num_nodes * num_patterns,
+			num_nodes * num_patterns * 4,
 			options,
 		);
 		let scales = new_zeroed_buffer::<u8>(
@@ -138,6 +144,7 @@ impl MetalLikelihood {
 			params,
 			num_patterns,
 			pattern_weights,
+			threads_per_threadgroup,
 			scale_ln,
 			scale,
 			inv_scale,
@@ -159,13 +166,14 @@ impl MetalLikelihood {
 		encoder.set_buffer(7, Some(&self.likelihoods), 0);
 		encoder.set_buffer(8, Some(&self.params), 0);
 
+		let num_threads = self.num_patterns as u64 * 4;
 		let threads_per_grid = MTLSize {
-			width: self.num_patterns as u64,
+			width: num_threads,
 			height: 1,
 			depth: 1,
 		};
 		let threads_per_threadgroup = MTLSize {
-			width: 256u64.min(self.num_patterns as u64),
+			width: self.threads_per_threadgroup.min(num_threads),
 			height: 1,
 			depth: 1,
 		};
@@ -299,6 +307,20 @@ impl Calculator<4, f64> for MetalLikelihood {
 
 fn cast_row(row: [f64; 4]) -> [f32; 4] {
 	[row[0] as f32, row[1] as f32, row[2] as f32, row[3] as f32]
+}
+
+fn threads_per_threadgroup(pipeline: &ComputePipelineState) -> u64 {
+	let max = (pipeline.max_total_threads_per_threadgroup() as u64).max(4);
+	let max = max - max % 4;
+	let default = 256.min(max);
+
+	env::var(THREADS_PER_THREADGROUP_ENV)
+		.ok()
+		.and_then(|value| value.parse::<u64>().ok())
+		.filter(|&value| value > 0)
+		.map(|value| value.min(max))
+		.map(|value| (value - value % 4).max(4))
+		.unwrap_or(default)
 }
 
 unsafe fn read_buffer<T: Copy>(buf: &Buffer, out: &mut [T]) {
