@@ -37,8 +37,9 @@ kernel void propose_kernel(
 	const device float4* transitions [[buffer(6)]],
 	device float* likelihoods [[buffer(7)]],
 	const device KernelParams* params_buf [[buffer(8)]],
+	threadgroup float* scratch [[threadgroup(0)]],
 	uint gid [[thread_position_in_grid]],
-	uint lane [[thread_index_in_simdgroup]]
+	uint tid [[thread_position_in_threadgroup]]
 ) {
 	const device KernelParams& params = params_buf[0];
 	uint num_sites = params.num_sites;
@@ -76,14 +77,16 @@ kernel void propose_kernel(
 
 		uint left_idx = projection_idx(left, site, sub, num_sites);
 		uint right_idx = projection_idx(right, site, sub, num_sites);
-		float local = projections[left_idx] * projections[right_idx];
+		scratch[tid] = projections[left_idx] * projections[right_idx];
 
-		uint base = lane - sub;
+		threadgroup_barrier(mem_flags::mem_threadgroup);
+
+		uint base = tid - sub;
 		float4 like = float4(
-			simd_shuffle(local, base + 0),
-			simd_shuffle(local, base + 1),
-			simd_shuffle(local, base + 2),
-			simd_shuffle(local, base + 3)
+			scratch[base + 0],
+			scratch[base + 1],
+			scratch[base + 2],
+			scratch[base + 3]
 		);
 		bool should_scale = like.x < scale
 			&& like.y < scale
@@ -92,7 +95,7 @@ kernel void propose_kernel(
 
 		uint proj_idx = node * num_sites + site;
 		if (should_scale) {
-			local *= inv_scale;
+			scratch[tid] *= inv_scale;
 			like *= inv_scale;
 		}
 
@@ -109,6 +112,8 @@ kernel void propose_kernel(
 			}
 		}
 
+		threadgroup_barrier(mem_flags::mem_threadgroup);
+
 		uint tbase = i * 4;
 		projections[projection_idx(node, site, sub, num_sites)] =
 			dot(transitions[tbase + sub], like);
@@ -124,14 +129,16 @@ kernel void propose_kernel(
 		projections[projection_idx(left, site, sub, num_sites)];
 	float right_projection =
 		projections[projection_idx(right, site, sub, num_sites)];
-	float local = left_projection * right_projection * frequencies[sub];
+	scratch[tid] = left_projection * right_projection * frequencies[sub];
+
+	threadgroup_barrier(mem_flags::mem_threadgroup);
 
 	if (sub == 0) {
-		uint base = lane;
-		float sum = local
-			+ simd_shuffle(local, base + 1)
-			+ simd_shuffle(local, base + 2)
-			+ simd_shuffle(local, base + 3);
+		uint base = tid;
+		float sum = scratch[base + 0]
+			+ scratch[base + 1]
+			+ scratch[base + 2]
+			+ scratch[base + 3];
 		likelihoods[site] = log(sum);
 
 		uint root_idx = root * num_sites + site;

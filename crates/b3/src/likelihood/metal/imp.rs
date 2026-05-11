@@ -189,6 +189,11 @@ impl MetalLikelihood {
 			depth: 1,
 		};
 
+		encoder.set_threadgroup_memory_length(
+			0,
+			(threads_per_threadgroup.width as usize
+				* mem::size_of::<f32>()) as u64,
+		);
 		encoder.dispatch_threads(
 			threads_per_grid,
 			threads_per_threadgroup,
