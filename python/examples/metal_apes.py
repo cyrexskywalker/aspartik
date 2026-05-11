@@ -3,9 +3,8 @@ Minimal Metal likelihood example based on apes.py.
 """
 
 from aspartik.b3 import MCMC, Clock
-from aspartik.b3.callbacks import TraceWriter
+from aspartik.b3.callbacks import PrintLogger, StateCheckpoint, TraceWriter
 from aspartik.b3.likelihoods import MetalLikelihood
-from aspartik.b3.loggers import PrintLogger, TreeLogger, ValueLogger
 from aspartik.b3.operators import (
     BeastNarrowExchange,
     BeastWideExchange,
@@ -20,7 +19,7 @@ from aspartik.b3.parameters import Real, RealVector, Tree
 from aspartik.b3.priors import ConstantPopulation, Distribution
 from aspartik.b3.substitutions import HKY
 from aspartik.b3.utils import run_from_cmdline
-from aspartik.io.msa import read_msa_from_fasta
+from aspartik.io import read_msa_from_fasta
 from aspartik.rng import RNG
 from aspartik.stats.distributions import Gamma, LogNormal, Uniform
 
@@ -42,15 +41,15 @@ def make_mcmc(fasta_path: str):
     ]
 
     operators = [
-        ParamScale(kappa, 0.75, Uniform(0, 1), rng, weight=1),
+        ParamScale(kappa, Uniform(0, 1), rng, weight=1),
         DeltaExchange(frequencies, factor=0.01, rng=rng, weight=1),
-        TreeScale(tree, 0.75, Uniform(0, 1), rng, weight=3),
+        TreeScale(tree, Uniform(0, 1), rng, weight=3),
         SubtreeSlide(tree, Uniform(-0.5, 0.5), rng, weight=30),
         BeastNarrowExchange(tree, rng, weight=30),
         BeastWideExchange(tree, rng, weight=3),
-        RootSlide(tree, 0.75, Uniform(0, 1), rng, weight=3),
+        RootSlide(tree, Uniform(0, 1), rng, weight=3),
         NodeSlide(tree, rng, weight=30),
-        ParamScale(population_size, 0.75, Uniform(0, 1), rng, weight=3),
+        ParamScale(population_size, Uniform(0, 1), rng, weight=3),
     ]
 
     likelihood = MetalLikelihood(
@@ -61,38 +60,23 @@ def make_mcmc(fasta_path: str):
     )
 
     loggers = [
-        TreeLogger(tree=tree, path="target/metal_apes.trees", every=1_000),
         PrintLogger(every=10_000),
-        ValueLogger(
-            {
-                "step": lambda: mcmc.current_step,
-                "posterior": lambda: mcmc.posterior,
-                "prior": lambda: mcmc.prior,
-                "likelihood": lambda: mcmc.likelihood.likelihood(),
-                "tree:height": lambda: tree.height_of(tree.root),
-                "tree:length": lambda: tree.total_length(),
-                "kappa": kappa,
-                "population_size": population_size,
-                "frequencies": frequencies,
-                "prior:kappa": priors[0],
-                "prior:population_size": priors[1],
-                "prior:coalescent": priors[2],
-            },
-            path="target/metal_apes.log",
-            every=1_000,
-        ),
         TraceWriter(
             {
                 "kappa": kappa,
                 "population_size": population_size,
                 "frequencies": frequencies,
                 "tree": tree,
+                "prior:kappa": priors[0],
+                "prior:population_size": priors[1],
+                "prior:coalescent": priors[2],
             },
             "target/metal_apes.trace",
             overwrite=True,
             zstd=True,
             every=1_000,
         ),
+        StateCheckpoint("target/metal_apes.state", every=10_000),
     ]
 
     mcmc = MCMC(
