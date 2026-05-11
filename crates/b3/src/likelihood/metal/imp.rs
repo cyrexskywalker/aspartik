@@ -80,7 +80,8 @@ impl MetalLikelihood {
 			.new_compute_pipeline_state_with_function(&function)
 			.map_err(anyhow::Error::msg)
 			.context("failed to create compute pipeline")?;
-		let threads_per_threadgroup = threads_per_threadgroup(&pipeline);
+		let threads_per_threadgroup =
+			threads_per_threadgroup(&pipeline);
 
 		let num_leaves = leaves.len() / num_patterns;
 		let num_internals = num_leaves - 1;
@@ -108,14 +109,24 @@ impl MetalLikelihood {
 			num_nodes * num_patterns,
 			options,
 		);
-		let scale_sums =
-			new_zeroed_buffer::<u32>(&device, num_patterns, options);
-		let likelihoods =
-			new_zeroed_buffer::<f32>(&device, num_patterns, options);
+		let scale_sums = new_zeroed_buffer::<u32>(
+			&device,
+			num_patterns,
+			options,
+		);
+		let likelihoods = new_zeroed_buffer::<f32>(
+			&device,
+			num_patterns,
+			options,
+		);
 
-		let nodes = new_zeroed_buffer::<u32>(&device, num_nodes, options);
-		let children =
-			new_zeroed_buffer::<u32>(&device, num_internals * 2, options);
+		let nodes =
+			new_zeroed_buffer::<u32>(&device, num_nodes, options);
+		let children = new_zeroed_buffer::<u32>(
+			&device,
+			num_internals * 2,
+			options,
+		);
 		let transitions = new_zeroed_buffer::<[f32; 4]>(
 			&device,
 			num_internals * 2 * 4,
@@ -178,7 +189,10 @@ impl MetalLikelihood {
 			depth: 1,
 		};
 
-		encoder.dispatch_threads(threads_per_grid, threads_per_threadgroup);
+		encoder.dispatch_threads(
+			threads_per_grid,
+			threads_per_threadgroup,
+		);
 		encoder.end_encoding();
 		command_buffer.commit();
 		command_buffer.wait_until_completed();
@@ -205,7 +219,8 @@ impl Calculator<4, f64> for MetalLikelihood {
 		let matrices = transitions.matrices(&nodes[..nodes.len() - 1]);
 		drop(tree);
 
-		let nodes_u32: Vec<u32> = nodes.iter().map(|&n| n as u32).collect();
+		let nodes_u32: Vec<u32> =
+			nodes.iter().map(|&n| n as u32).collect();
 		let children_u32: Vec<u32> = children
 			.iter()
 			.flat_map(|&[l, r]| [l as u32, r as u32])
@@ -230,7 +245,8 @@ impl Calculator<4, f64> for MetalLikelihood {
 				&self.params,
 				&[KernelParams {
 					num_sites: self.num_patterns as u32,
-					num_updated_nodes: (nodes.len() - 1) as u32,
+					num_updated_nodes: (nodes.len() - 1)
+						as u32,
 					leaves_end: leaves_end as u32,
 					scale_ln: self.scale_ln,
 					scale: self.scale,
@@ -267,8 +283,8 @@ impl Calculator<4, f64> for MetalLikelihood {
 			.zip(scale_sums)
 			.zip(&self.pattern_weights)
 		{
-			let weighted =
-				(f64::from(likelihood) - f64::from(scale)) * f64::from(*weight);
+			let weighted = (f64::from(likelihood)
+				- f64::from(scale)) * f64::from(*weight);
 			sum += weighted;
 		}
 
