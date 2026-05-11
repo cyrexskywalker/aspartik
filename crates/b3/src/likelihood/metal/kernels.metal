@@ -67,6 +67,8 @@ kernel void propose_kernel(
 			calc_leaf_projection(leaf, transitions[tbase + sub]);
 	}
 
+	threadgroup_barrier(mem_flags::mem_device);
+
 	for (uint i = leaves_end; i < num_updated; i++) {
 		uint node = nodes[i];
 		uint left = children[(i - leaves_end) * 2 + 0];
@@ -110,6 +112,8 @@ kernel void propose_kernel(
 		uint tbase = i * 4;
 		projections[projection_idx(node, site, sub, num_sites)] =
 			dot(transitions[tbase + sub], like);
+
+		threadgroup_barrier(mem_flags::mem_device);
 	}
 
 	uint root = nodes[num_updated];
