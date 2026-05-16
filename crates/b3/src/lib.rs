@@ -23,6 +23,7 @@ pub mod pymodule {
 		clock::PyClock,
 		likelihood::{
 			PyCpu4Likelihood, PyCudaLikelihood, PyHeteroLikelihood,
+			PyMetalLikelihood,
 		},
 		mcmc::Mcmc,
 		operators::{

@@ -16,10 +16,12 @@ use data::{DnaNucleotide, Msa, PyMsa, seq::Character};
 mod cpu;
 mod cuda;
 mod hetero;
+mod metal;
 
 use cpu::Cpu4Calculator;
 use cuda::CudaLikelihood;
 pub use hetero::PyHeteroLikelihood;
+use metal::MetalLikelihood;
 
 /// Felsenstein's pruning tree likelihood calculator
 ///
@@ -329,10 +331,47 @@ likelihood_methods! {PyCudaLikelihood;
 	}
 }
 
+/// Likelihood calculations on Apple Metal (macOS only).
+#[pyclass(name = "MetalLikelihood", module = "aspartik.b3.likelihoods", frozen)]
+pub struct PyMetalLikelihood {
+	inner: Mutex<GenericLikelihood<4, f64, MetalLikelihood>>,
+}
+
+likelihood_methods! {PyMetalLikelihood;
+	#[new]
+	#[pyo3(signature = (
+		msa, substitution, clock, tree,
+		*,
+		scale_ln = 30,
+	))]
+	fn new(
+		msa: Py<PyMsa>,
+		substitution: PySubstitution4,
+		clock: Py<PyClock>,
+		tree: Py<PyTree>,
+		scale_ln: u32,
+	) -> Result<Self> {
+		let (leaves, weights) = deduplicate(msa.get());
+		let calculator =
+			MetalLikelihood::new(weights, leaves, scale_ln)?;
+		let generic = GenericLikelihood::new(
+			calculator,
+			substitution,
+			clock,
+			tree,
+		)?;
+
+		Ok(Self {
+			inner: Mutex::new(generic),
+		})
+	}
+}
+
 #[derive(FromPyObject, IntoPyObject)]
 pub enum PyLikelihood {
 	Cpu(Py<PyCpu4Likelihood>),
 	Cuda(Py<PyCudaLikelihood>),
+	Metal(Py<PyMetalLikelihood>),
 	Hetero(Py<PyHeteroLikelihood>),
 }
 
@@ -341,6 +380,7 @@ impl PyLikelihood {
 		match self {
 			Self::Cpu(l) => Self::Cpu(l.clone_ref(py)),
 			Self::Cuda(l) => Self::Cuda(l.clone_ref(py)),
+			Self::Metal(l) => Self::Metal(l.clone_ref(py)),
 			Self::Hetero(l) => Self::Hetero(l.clone_ref(py)),
 		}
 	}
@@ -349,6 +389,7 @@ impl PyLikelihood {
 		match self {
 			Self::Cpu(l) => l.get().likelihood(),
 			Self::Cuda(l) => l.get().likelihood(),
+			Self::Metal(l) => l.get().likelihood(),
 			Self::Hetero(l) => l.get().likelihood(),
 		}
 	}
@@ -357,6 +398,7 @@ impl PyLikelihood {
 		match self {
 			Self::Cpu(l) => l.get().accept(),
 			Self::Cuda(l) => l.get().accept(),
+			Self::Metal(l) => l.get().accept(),
 			Self::Hetero(l) => l.get().accept(),
 		}
 	}
@@ -365,6 +407,7 @@ impl PyLikelihood {
 		match self {
 			Self::Cpu(l) => l.get().reject(),
 			Self::Cuda(l) => l.get().reject(),
+			Self::Metal(l) => l.get().reject(),
 			Self::Hetero(l) => l.get().reject(),
 		}
 	}
@@ -373,6 +416,7 @@ impl PyLikelihood {
 		match self {
 			Self::Cpu(l) => l.get().num_patterns(),
 			Self::Cuda(l) => l.get().num_patterns(),
+			Self::Metal(l) => l.get().num_patterns(),
 			Self::Hetero(l) => l.get().num_patterns(),
 		}
 	}
@@ -381,6 +425,7 @@ impl PyLikelihood {
 		match self {
 			Self::Cpu(l) => l.get().pattern_likelihoods(),
 			Self::Cuda(l) => l.get().pattern_likelihoods(),
+			Self::Metal(l) => l.get().pattern_likelihoods(),
 			Self::Hetero(_l) => todo!(),
 		}
 	}

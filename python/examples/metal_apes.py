@@ -1,0 +1,99 @@
+"""
+Minimal Metal likelihood example based on apes.py.
+"""
+
+from aspartik.b3 import MCMC, Clock
+from aspartik.b3.callbacks import PrintLogger, StateCheckpoint, TraceWriter
+from aspartik.b3.likelihoods import MetalLikelihood
+from aspartik.b3.operators import (
+    BeastNarrowExchange,
+    BeastWideExchange,
+    DeltaExchange,
+    NodeSlide,
+    ParamScale,
+    RootSlide,
+    SubtreeSlide,
+    TreeScale,
+)
+from aspartik.b3.parameters import Real, RealVector, Tree
+from aspartik.b3.priors import ConstantPopulation, Distribution
+from aspartik.b3.substitutions import HKY
+from aspartik.b3.utils import run_from_cmdline
+from aspartik.io import read_msa_from_fasta
+from aspartik.rng import RNG
+from aspartik.stats.distributions import Gamma, LogNormal, Uniform
+
+
+def make_mcmc(fasta_path: str):
+    msa = read_msa_from_fasta(fasta_path)
+
+    rng = RNG(4)
+    tree = Tree(msa.sequence_names(), rng)
+
+    kappa = Real(2.0)
+    population_size = Real(2.0)
+    frequencies = RealVector(0.25, 0.25, 0.25, 0.25)
+
+    priors = [
+        Distribution(kappa, LogNormal(1.0, 1.25)),
+        Distribution(population_size, Gamma(0.001, 1 / 1000.0)),
+        ConstantPopulation(tree, population_size),
+    ]
+
+    operators = [
+        ParamScale(kappa, Uniform(0, 1), rng, weight=1),
+        DeltaExchange(frequencies, factor=0.01, rng=rng, weight=1),
+        TreeScale(tree, Uniform(0, 1), rng, weight=3),
+        SubtreeSlide(tree, Uniform(-0.5, 0.5), rng, weight=30),
+        BeastNarrowExchange(tree, rng, weight=30),
+        BeastWideExchange(tree, rng, weight=3),
+        RootSlide(tree, Uniform(0, 1), rng, weight=3),
+        NodeSlide(tree, rng, weight=30),
+        ParamScale(population_size, Uniform(0, 1), rng, weight=3),
+    ]
+
+    likelihood = MetalLikelihood(
+        msa=msa,
+        substitution=HKY(frequencies, kappa),
+        clock=Clock.Strict(Real(1.0)),
+        tree=tree,
+    )
+
+    loggers = [
+        PrintLogger(every=10_000),
+        TraceWriter(
+            {
+                "kappa": kappa,
+                "population_size": population_size,
+                "frequencies": frequencies,
+                "tree": tree,
+                "prior:kappa": priors[0],
+                "prior:population_size": priors[1],
+                "prior:coalescent": priors[2],
+            },
+            "target/metal_apes.trace",
+            overwrite=True,
+            zstd=True,
+            every=1_000,
+        ),
+        StateCheckpoint("target/metal_apes.state", every=10_000),
+    ]
+
+    mcmc = MCMC(
+        state=[tree, kappa, population_size, frequencies],
+        priors=priors,
+        operators=operators,
+        likelihood=likelihood,
+        callbacks=loggers,
+        rng=rng,
+    )
+
+    return mcmc
+
+
+def run(fasta_path: str):
+    run_from_cmdline(make_mcmc(fasta_path))
+
+
+if __name__ == "__main__":
+    run("data/alignments/apes.fasta")
