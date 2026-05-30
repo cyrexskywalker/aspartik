@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="420" viewBox="0 0 980 420">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="490" y="30" text-anchor="middle" font-family="Arial" font-size="20" font-weight="700">CPU vs Metal на rand_msa</text>
+<line x1="90" y1="340" x2="950" y2="340" stroke="#333"/>
+<line x1="90" y1="55" x2="90" y2="340" stroke="#333"/>
+<text x="18" y="60" font-family="Arial" font-size="13">ms</text>
+<line x1="85" y1="340.00" x2="950" y2="340.00" stroke="#e6e6e6"/>
+<text x="80" y="344.00" text-anchor="end" font-family="Arial" font-size="11">0.0</text>
+<line x1="85" y1="284.00" x2="950" y2="284.00" stroke="#e6e6e6"/>
+<text x="80" y="288.00" text-anchor="end" font-family="Arial" font-size="11">8.4</text>
+<line x1="85" y1="228.00" x2="950" y2="228.00" stroke="#e6e6e6"/>
+<text x="80" y="232.00" text-anchor="end" font-family="Arial" font-size="11">16.8</text>
+<line x1="85" y1="172.00" x2="950" y2="172.00" stroke="#e6e6e6"/>
+<text x="80" y="176.00" text-anchor="end" font-family="Arial" font-size="11">25.1</text>
+<line x1="85" y1="116.00" x2="950" y2="116.00" stroke="#e6e6e6"/>
+<text x="80" y="120.00" text-anchor="end" font-family="Arial" font-size="11">33.5</text>
+<line x1="85" y1="60.00" x2="950" y2="60.00" stroke="#e6e6e6"/>
+<text x="80" y="64.00" text-anchor="end" font-family="Arial" font-size="11">41.9</text>
+<rect x="115.19" y="337.21" width="56.67" height="2.79" fill="#4e79a7"/>
+<text x="143.52" y="331.21" text-anchor="middle" font-family="Arial" font-size="11">0.4</text>
+<rect x="178.15" y="333.97" width="56.67" height="6.03" fill="#f28e2b"/>
+<text x="206.48" y="327.97" text-anchor="middle" font-family="Arial" font-size="11">0.9</text>
+<text x="175.00" y="364" text-anchor="middle" font-family="Arial" font-size="12">32x10000</text>
+<rect x="285.19" y="327.17" width="56.67" height="12.83" fill="#4e79a7"/>
+<text x="313.52" y="321.17" text-anchor="middle" font-family="Arial" font-size="11">1.9</text>
+<rect x="348.15" y="324.88" width="56.67" height="15.12" fill="#f28e2b"/>
+<text x="376.48" y="318.88" text-anchor="middle" font-family="Arial" font-size="11">2.3</text>
+<text x="345.00" y="364" text-anchor="middle" font-family="Arial" font-size="12">64x20000</text>
+<rect x="455.19" y="280.38" width="56.67" height="59.62" fill="#4e79a7"/>
+<text x="483.52" y="274.38" text-anchor="middle" font-family="Arial" font-size="11">8.9</text>
+<rect x="518.15" y="283.22" width="56.67" height="56.78" fill="#f28e2b"/>
+<text x="546.48" y="277.22" text-anchor="middle" font-family="Arial" font-size="11">8.5</text>
+<text x="515.00" y="364" text-anchor="middle" font-family="Arial" font-size="12">128x50000</text>
+<rect x="625.19" y="228.63" width="56.67" height="111.37" fill="#4e79a7"/>
+<text x="653.52" y="222.63" text-anchor="middle" font-family="Arial" font-size="11">16.7</text>
+<rect x="688.15" y="236.94" width="56.67" height="103.06" fill="#f28e2b"/>
+<text x="716.48" y="230.94" text-anchor="middle" font-family="Arial" font-size="11">15.4</text>
+<text x="685.00" y="364" text-anchor="middle" font-family="Arial" font-size="12">128x100000</text>
+<rect x="795.19" y="60.00" width="56.67" height="280.00" fill="#4e79a7"/>
+<text x="823.52" y="54.00" text-anchor="middle" font-family="Arial" font-size="11">41.9</text>
+<rect x="858.15" y="118.75" width="56.67" height="221.25" fill="#f28e2b"/>
+<text x="886.48" y="112.75" text-anchor="middle" font-family="Arial" font-size="11">33.1</text>
+<text x="855.00" y="364" text-anchor="middle" font-family="Arial" font-size="12">256x100000</text>
+<rect x="390" y="365" width="14" height="14" fill="#4e79a7"/>
+<text x="410" y="377" font-family="Arial" font-size="13">CPU</text>
+<rect x="470" y="365" width="14" height="14" fill="#f28e2b"/>
+<text x="490" y="377" font-family="Arial" font-size="13">Metal</text>
+</svg>
